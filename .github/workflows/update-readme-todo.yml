@@ -1,0 +1,101 @@
+name: Update README TODO list
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/update-readme-todo.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme-todo:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Refresh TODO entries changed on dev
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          readme_path = Path('README.md')
+          readme = readme_path.read_text(encoding='utf-8')
+          title = '### 📝 Complete TODO List'
+          start = readme.index(title)
+          end = readme.index('## 🤝 Contributing', start)
+          section = readme[start:end]
+
+          entry_pattern = re.compile(r'^- \[ \] \*\*(.+?):(\d+)\*\* - (.*)$', re.MULTILINE)
+          baseline = [
+              {'path': match.group(1), 'line': int(match.group(2)), 'text': match.group(3)}
+              for match in entry_pattern.finditer(section)
+          ]
+          assert len(baseline) == 251, f'Unexpected baseline TODO count: {len(baseline)}'
+
+          changed_files = [
+              'luffy/deepscaler/utils.py',
+              'luffy/verl/verl/protocol.py',
+          ]
+
+          def extract_todos(path):
+              todos = []
+              for line_number, source_line in enumerate(Path(path).read_text(encoding='utf-8').splitlines(), 1):
+                  match = re.match(r'^\s*#\s*TODO(.*)$', source_line)
+                  if match:
+                      text = match.group(1)
+                      if text.startswith(':'):
+                          text = text[1:]
+                      todos.append({'path': path, 'line': line_number, 'text': text.strip()})
+              return todos
+
+          refreshed = {path: extract_todos(path) for path in changed_files}
+          assert [t['line'] for t in refreshed[changed_files[0]]] == [45, 46, 47, 107, 108, 109, 110, 111, 112, 113, 114]
+          assert [t['line'] for t in refreshed[changed_files[1]]] == [114, 115, 136, 137, 169, 265, 351]
+
+          entries = [entry for entry in baseline if entry['path'] not in changed_files]
+          for path in changed_files:
+              entries.extend(refreshed[path])
+          entries.sort(key=lambda entry: (entry['path'], entry['line']))
+
+          assert len(entries) == 240, f'Unexpected refreshed TODO count: {len(entries)}'
+          for previous, current in zip(entries, entries[1:]):
+              assert (previous['path'], previous['line']) < (current['path'], current['line'])
+
+          lines = [title, '']
+          lines.extend(
+              f"- [ ] **{entry['path']}:{entry['line']}** - {entry['text']}"
+              for entry in entries
+          )
+          new_section = '\n'.join(lines) + '\n\n'
+          updated = readme[:start] + new_section + readme[end:]
+          assert updated.count(title) == 1
+          assert updated[:start] == readme[:start]
+          assert updated[updated.index('## 🤝 Contributing', start):] == readme[end:]
+
+          readme_path.write_text(updated, encoding='utf-8')
+          print(f'Updated TODO entries: {len(baseline)} -> {len(entries)}')
+          for path in changed_files:
+              print(f'{path}:')
+              for entry in refreshed[path]:
+                  print(f"  {entry['line']}: {entry['text']}")
+          PY
+
+      - name: Commit README update
+        run: |
+          git diff --check
+          if git diff --quiet -- README.md; then
+            echo 'README TODO list is already up to date.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md
+          git commit -m 'docs: update README TODO list for dev changes'
+          git push origin dev
