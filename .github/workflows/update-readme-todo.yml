@@ -37,7 +37,10 @@ jobs:
               {'path': match.group(1), 'line': int(match.group(2)), 'text': match.group(3)}
               for match in entry_pattern.finditer(section)
           ]
-          assert len(baseline) == 251, f'Unexpected baseline TODO count: {len(baseline)}'
+          section_lines = section.splitlines()
+          entry_lines = [line for line in section_lines[1:] if line.strip()]
+          assert all(line.startswith('- [ ] **') for line in entry_lines)
+          assert len(entry_lines) == len(baseline), 'The baseline section contains an unrecognized entry'
 
           changed_files = [
               'luffy/deepscaler/utils.py',
@@ -64,7 +67,7 @@ jobs:
               entries.extend(refreshed[path])
           entries.sort(key=lambda entry: (entry['path'], entry['line']))
 
-          assert len(entries) == 240, f'Unexpected refreshed TODO count: {len(entries)}'
+          assert len(entries) == len(baseline) - 11
           for previous, current in zip(entries, entries[1:]):
               assert (previous['path'], previous['line']) < (current['path'], current['line'])
 
